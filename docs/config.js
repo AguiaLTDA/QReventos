@@ -7,4 +7,4 @@
  *
  * Onde achar: editor do Apps Script > Implantar > Gerenciar implantações.
  */
-const API_URL = 'COLE_AQUI_A_URL_QUE_TERMINA_EM_EXEC';
+const API_URL = 'https://script.google.com/macros/s/AKfycbxblZ6SKMCMSKbd1lOz2VaOPqdzFIk-XvO2xZeD7t3dn-6yVsccei5AVNRzgqDn9FuIbQ/exec';
