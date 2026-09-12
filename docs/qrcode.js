@@ -1,4 +1,3 @@
-<script>
 /**
  * GERADOR DE QR CODE EMBUTIDO — QReventos
  * ------------------------------------------------------------------
@@ -478,4 +477,3 @@ var QRDinamico = (function () {
 })();
 
 if (typeof module !== 'undefined' && module.exports) module.exports = QRDinamico;
-</script>

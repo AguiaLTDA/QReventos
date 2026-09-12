@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Portal Administrativo — Presença UNIVC</title>
+  <link rel="stylesheet" href="estilo.css">
+</head>
+<body>
+
+  <!-- Entrada da equipe -->
+  <div class="cartao" id="telaChave">
+    <h1>Portal administrativo</h1>
+    <div class="sub">Informe a chave administrativa para cadastrar eventos e abrir a tela do QR Code.</div>
+    <label for="chave">Chave administrativa</label>
+    <input id="chave" type="password" autocomplete="current-password">
+    <button id="btnEntrar">Entrar</button>
+    <div class="mensagem" id="msgChave"></div>
+  </div>
+
+  <!-- Cadastro -->
+  <div class="cartao escondido" id="telaNovoEvento">
+    <h1>Novo evento</h1>
+    <div class="sub">Cadastre um evento para gerar seu QR Code de presença dinâmico.</div>
+    <label for="titulo">Título do evento</label>
+    <input id="titulo" placeholder="Ex: Palestra de Empreendedorismo">
+    <label for="data">Data</label>
+    <input id="data" type="date">
+    <label for="cargaHoraria">Carga horária (horas)</label>
+    <input id="cargaHoraria" type="number" min="1" placeholder="Ex: 2">
+    <button id="btnCriar">Cadastrar evento</button>
+    <div class="mensagem" id="msgCriar"></div>
+  </div>
+
+  <!-- Listagem -->
+  <div class="cartao escondido" id="telaEventos">
+    <h1>Eventos cadastrados</h1>
+    <table>
+      <thead><tr><th>Título</th><th>Data</th><th>Horas</th><th>QR</th></tr></thead>
+      <tbody id="corpoTabela"></tbody>
+    </table>
+    <div class="mensagem" id="msgLista"></div>
+    <button class="discreto" id="btnSair">Sair deste computador</button>
+  </div>
+
+  <script src="config.js"></script>
+  <script src="api.js"></script>
+  <script>
+    const el = (id) => document.getElementById(id);
+
+    function mostrarMensagem(id, texto, tipo) {
+      const alvo = el(id);
+      alvo.textContent = texto;
+      alvo.className = 'mensagem' + (tipo ? ' ' + tipo : '');
+    }
+
+    function mostrarPainel(logado) {
+      el('telaChave').classList.toggle('escondido', logado);
+      el('telaNovoEvento').classList.toggle('escondido', !logado);
+      el('telaEventos').classList.toggle('escondido', !logado);
+    }
+
+    async function entrar() {
+      const chave = el('chave').value.trim();
+      if (!chave) {
+        mostrarMensagem('msgChave', 'Informe a chave.', 'falha');
+        return;
+      }
+      guardarChaveAdmin(chave);
+      mostrarMensagem('msgChave', 'Verificando...');
+
+      // Uma listagem serve de teste da chave: se voltar autorizado, entra.
+      const resposta = await chamarComoAdmin({ acao: 'listarEventos' });
+      if (!resposta.ok) {
+        mostrarMensagem('msgChave', resposta.erro, 'falha');
+        return;
+      }
+      el('chave').value = '';
+      mostrarMensagem('msgChave', '');
+      mostrarPainel(true);
+      preencherTabela(resposta.eventos);
+    }
+
+    async function criar() {
+      const titulo = el('titulo').value.trim();
+      const data = el('data').value;
+      const cargaHoraria = el('cargaHoraria').value;
+      if (!titulo || !data || !cargaHoraria) {
+        mostrarMensagem('msgCriar', 'Preencha todos os campos.', 'falha');
+        return;
+      }
+
+      el('btnCriar').disabled = true;
+      mostrarMensagem('msgCriar', 'Salvando...');
+      const resposta = await chamarComoAdmin({
+        acao: 'criarEvento', titulo: titulo, data: data, cargaHoraria: cargaHoraria
+      });
+      el('btnCriar').disabled = false;
+
+      if (!resposta.ok) {
+        mostrarMensagem('msgCriar', resposta.erro, 'falha');
+        if (resposta.semAutorizacao) mostrarPainel(false);
+        return;
+      }
+
+      mostrarMensagem('msgCriar', 'Evento criado.', 'boa');
+      el('titulo').value = '';
+      el('data').value = '';
+      el('cargaHoraria').value = '';
+      carregarEventos();
+    }
+
+    function preencherTabela(eventos) {
+      const corpo = el('corpoTabela');
+      corpo.textContent = '';
+
+      if (!eventos.length) {
+        mostrarMensagem('msgLista', 'Nenhum evento cadastrado ainda.');
+        return;
+      }
+      mostrarMensagem('msgLista', '');
+
+      eventos.forEach(function (ev) {
+        const tr = document.createElement('tr');
+        [ev.titulo, ev.data, ev.cargaHoraria].forEach(function (valor) {
+          const td = document.createElement('td');
+          td.textContent = valor; // textContent, e não innerHTML: título de evento é texto digitado
+          tr.appendChild(td);
+        });
+
+        const tdLink = document.createElement('td');
+        const link = document.createElement('a');
+        link.href = 'exibir.html?evento=' + encodeURIComponent(ev.id);
+        link.target = '_blank';
+        link.rel = 'noopener';
+        link.textContent = 'Abrir QR';
+        tdLink.appendChild(link);
+        tr.appendChild(tdLink);
+
+        corpo.appendChild(tr);
+      });
+    }
+
+    async function carregarEventos() {
+      const resposta = await chamarComoAdmin({ acao: 'listarEventos' });
+      if (!resposta.ok) {
+        mostrarMensagem('msgLista', resposta.erro, 'falha');
+        if (resposta.semAutorizacao) mostrarPainel(false);
+        return;
+      }
+      preencherTabela(resposta.eventos);
+    }
+
+    el('btnEntrar').addEventListener('click', entrar);
+    el('chave').addEventListener('keydown', (e) => { if (e.key === 'Enter') entrar(); });
+    el('btnCriar').addEventListener('click', criar);
+    el('btnSair').addEventListener('click', function () {
+      esquecerChaveAdmin();
+      mostrarPainel(false);
+    });
+
+    if (API_NAO_CONFIGURADA) {
+      mostrarMensagem('msgChave', 'A URL da API ainda não foi preenchida em docs/config.js.', 'falha');
+    } else if (chaveAdmin()) {
+      mostrarPainel(true);
+      carregarEventos();
+    }
+  </script>
+</body>
+</html>

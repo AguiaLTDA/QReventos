@@ -1,5 +1,5 @@
 /**
- * Teste de regressão do gerador de QR Code (QRCode.html).
+ * Teste de regressão do gerador de QR Code (docs/qrcode.js).
  *
  * Não precisa de nenhuma dependência: rode com `node testes/verificar-qrcode.js`
  * a partir da raiz do projeto.
@@ -7,7 +7,7 @@
  * Os vetores em `vetores.json` foram conferidos módulo a módulo contra duas
  * implementações independentes da ISO/IEC 18004 (segno e qrcode, ambas em
  * Python) e contra um leitor real (OpenCV). Se este teste falhar depois de uma
- * alteração em QRCode.html, o gerador mudou de comportamento — confira antes de
+ * alteração em docs/qrcode.js, o gerador mudou de comportamento — confira antes de
  * regravar os vetores.
  */
 'use strict';
@@ -19,10 +19,7 @@ const crypto = require('crypto');
 const raiz = path.join(__dirname, '..');
 
 function carregarGerador() {
-  const html = fs.readFileSync(path.join(raiz, 'QRCode.html'), 'utf8');
-  const js = html
-    .replace(/^[\s\S]*?<script>/, '')
-    .replace(/<\/script>[\s\S]*$/, '');
+  const js = fs.readFileSync(path.join(raiz, 'docs', 'qrcode.js'), 'utf8');
   const modulo = { exports: {} };
   new Function('module', js)(modulo);
   return modulo.exports;

@@ -1,0 +1,116 @@
+:root {
+  --fundo: #f4f6f8;
+  --cartao: #ffffff;
+  --texto: #1f2937;
+  --apagado: #6b7280;
+  --borda: #d1d5db;
+  --linha: #e5e7eb;
+  --acao: #2563eb;
+  --acao-escura: #1d4ed8;
+  --erro: #b91c1c;
+  --erro-fundo: #fef2f2;
+  --sucesso: #15803d;
+  --sucesso-fundo: #f0fdf4;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  font-family: 'Segoe UI', Arial, sans-serif;
+  background: var(--fundo);
+  color: var(--texto);
+  margin: 0;
+  padding: 24px 16px;
+  line-height: 1.5;
+}
+
+.cartao {
+  background: var(--cartao);
+  border-radius: 12px;
+  padding: 20px;
+  max-width: 560px;
+  margin: 0 auto 20px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+h1 { font-size: 20px; margin: 0 0 4px; }
+.sub { color: var(--apagado); font-size: 13px; margin-bottom: 16px; }
+
+label { display: block; font-size: 13px; font-weight: 600; margin: 12px 0 4px; }
+
+input, select {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid var(--borda);
+  border-radius: 8px;
+  font-size: 14px;
+  font-family: inherit;
+}
+
+button {
+  margin-top: 16px;
+  background: var(--acao);
+  color: #fff;
+  border: none;
+  padding: 13px 18px;
+  border-radius: 8px;
+  font-size: 15px;
+  font-family: inherit;
+  cursor: pointer;
+  width: 100%;
+}
+button:hover { background: var(--acao-escura); }
+button:disabled { background: var(--apagado); cursor: default; }
+
+button.discreto {
+  background: none;
+  color: var(--apagado);
+  width: auto;
+  padding: 6px 0;
+  font-size: 13px;
+  text-decoration: underline;
+  margin-top: 0;
+}
+button.discreto:hover { background: none; color: var(--texto); }
+
+table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 13px; }
+th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--linha); }
+a { color: var(--acao); font-weight: 600; }
+
+.aviso, .erro, .ok {
+  padding: 14px;
+  border-radius: 10px;
+  font-size: 14px;
+  margin-top: 12px;
+}
+.erro, .aviso { background: var(--erro-fundo); color: var(--erro); }
+.ok { background: var(--sucesso-fundo); color: var(--sucesso); text-align: center; }
+
+.mensagem { margin-top: 10px; font-size: 13px; min-height: 18px; }
+.mensagem.falha { color: var(--erro); }
+.mensagem.boa { color: var(--sucesso); }
+
+.escondido { display: none; }
+
+/* ---------- tela de projeção ---------- */
+
+body.projecao {
+  background: #111827;
+  color: #fff;
+  text-align: center;
+  padding: 40px 16px;
+}
+body.projecao h1 { font-size: 26px; }
+body.projecao .info { color: #9ca3af; margin-bottom: 24px; }
+
+#qr {
+  display: inline-block;
+  padding: 16px;
+  background: #fff;
+  border-radius: 16px;
+  line-height: 0;
+}
+#qr svg { width: min(60vmin, 420px); height: auto; }
+
+.contador { margin-top: 18px; font-size: 15px; color: #93c5fd; }
+.projecao .mensagem { color: #fca5a5; min-height: 20px; margin-top: 14px; }

@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>QR Code de Presença — UNIVC</title>
+  <link rel="stylesheet" href="estilo.css">
+</head>
+<body class="projecao">
+  <h1 id="titulo">Carregando...</h1>
+  <div class="info" id="info"></div>
+  <div id="qr"></div>
+  <div class="contador escondido" id="blocoContador">Atualiza em <span id="segundos">60</span>s</div>
+  <div class="mensagem" id="mensagem"></div>
+
+  <script src="config.js"></script>
+  <script src="api.js"></script>
+  <script src="qrcode.js"></script>
+  <script>
+    const el = (id) => document.getElementById(id);
+    const eventoId = new URLSearchParams(location.search).get('evento') || '';
+
+    // O QR aponta para a página de presença ao lado desta, seja qual for o
+    // endereço onde o site estiver publicado.
+    const urlFormulario = new URL('presenca.html', location.href).href;
+
+    let timerContagem = null;
+
+    function avisar(texto) {
+      el('mensagem').textContent = texto;
+    }
+
+    function montarQr(token) {
+      const destino = urlFormulario
+        + '?evento=' + encodeURIComponent(eventoId)
+        + '&token=' + encodeURIComponent(token);
+      // Nível M: tolera ~15% de dano, suficiente para telão, reflexo e foto de longe.
+      QRDinamico.renderizar(el('qr'), destino, { nivel: 'M', tamanho: 420 });
+    }
+
+    function iniciarContagem(segundos) {
+      if (timerContagem) clearInterval(timerContagem);
+      el('blocoContador').classList.remove('escondido');
+      let restante = segundos;
+      el('segundos').textContent = restante;
+      timerContagem = setInterval(function () {
+        restante--;
+        el('segundos').textContent = Math.max(restante, 0);
+        if (restante <= 0) clearInterval(timerContagem);
+      }, 1000);
+    }
+
+    async function atualizar() {
+      const resposta = await chamarComoAdmin({ acao: 'token', evento: eventoId });
+
+      if (!resposta.ok) {
+        avisar(resposta.erro + (resposta.semAutorizacao
+          ? ' Abra esta tela pelo portal administrativo.'
+          : ' Nova tentativa em 5s.'));
+        if (!resposta.semAutorizacao) setTimeout(atualizar, 5000);
+        return;
+      }
+
+      try {
+        montarQr(resposta.token);
+        avisar('');
+      } catch (err) {
+        avisar('Não foi possível desenhar o QR Code: ' + err.message);
+        return;
+      }
+
+      iniciarContagem(resposta.segundosRestantes);
+      // Reagenda no fim da janela de token do servidor, em vez de a cada 60s
+      // corridos: sem isso o relógio da tela vai saindo de sincronia e o QR
+      // exibido passa a ser o da janela anterior.
+      setTimeout(atualizar, resposta.segundosRestantes * 1000 + 500);
+    }
+
+    async function iniciar() {
+      if (!eventoId) {
+        el('titulo').textContent = 'Evento não informado';
+        avisar('Abra esta tela pelo portal administrativo, clicando em "Abrir QR".');
+        return;
+      }
+      if (!chaveAdmin()) {
+        el('titulo').textContent = 'Sem autorização';
+        avisar('Entre no portal administrativo neste computador antes de abrir a tela do QR.');
+        return;
+      }
+
+      const info = await chamarComoAdmin({ acao: 'listarEventos' });
+      if (info.ok) {
+        const evento = info.eventos.filter((e) => e.id === eventoId)[0];
+        if (evento) {
+          el('titulo').textContent = evento.titulo;
+          el('info').textContent = evento.data + ' · ' + evento.cargaHoraria
+            + 'h — escaneie para confirmar presença';
+          document.title = evento.titulo + ' — QR de Presença';
+        } else {
+          el('titulo').textContent = 'Evento não encontrado';
+          return;
+        }
+      } else {
+        el('titulo').textContent = 'Não foi possível carregar o evento';
+        avisar(info.erro);
+        return;
+      }
+
+      atualizar();
+    }
+
+    iniciar();
+  </script>
+</body>
+</html>

@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Confirmar Presença — UNIVC</title>
+  <link rel="stylesheet" href="estilo.css">
+</head>
+<body>
+  <div class="cartao">
+    <h1 id="titulo">Verificando o QR Code...</h1>
+    <div class="sub" id="info"></div>
+
+    <div id="formulario" class="escondido">
+      <label for="nome">Nome completo</label>
+      <input id="nome" autocomplete="name">
+
+      <label for="cpf">CPF</label>
+      <input id="cpf" inputmode="numeric" placeholder="000.000.000-00">
+
+      <label for="matricula">Matrícula</label>
+      <input id="matricula" inputmode="numeric">
+
+      <label for="curso">Curso</label>
+      <select id="curso">
+        <option value="">Selecione</option>
+        <option>Administração</option>
+        <option>Agronomia</option>
+        <option>Análise e Desenvolvimento de Sistemas</option>
+        <option>Arquitetura e Urbanismo</option>
+        <option>Ciências Contábeis</option>
+        <option>Direito</option>
+        <option>Educação Física</option>
+        <option>Enfermagem</option>
+        <option>Engenharia de Produção</option>
+        <option>Engenharia Mecânica</option>
+        <option>Farmácia</option>
+        <option>Fisioterapia</option>
+        <option>Medicina Veterinária</option>
+        <option>Odontologia</option>
+        <option>Psicologia</option>
+        <option>Publicidade e Propaganda</option>
+      </select>
+
+      <label for="periodo">Período</label>
+      <input id="periodo" placeholder="Ex: 3º período">
+
+      <button id="btnEnviar">Confirmar presença</button>
+    </div>
+
+    <div class="mensagem" id="mensagem"></div>
+  </div>
+
+  <script src="config.js"></script>
+  <script src="api.js"></script>
+  <script>
+    const el = (id) => document.getElementById(id);
+    const parametros = new URLSearchParams(location.search);
+    const eventoId = parametros.get('evento') || '';
+    const token = parametros.get('token') || '';
+
+    function mostrarMensagem(texto, tipo) {
+      const alvo = el('mensagem');
+      alvo.textContent = texto;
+      alvo.className = 'mensagem' + (tipo ? ' ' + tipo : '');
+    }
+
+    function encerrar(titulo, detalhe) {
+      el('titulo').textContent = titulo;
+      el('info').textContent = detalhe || '';
+      el('formulario').classList.add('escondido');
+    }
+
+    async function carregar() {
+      if (!eventoId || !token) {
+        encerrar('Link incompleto', 'Escaneie o QR Code na tela do evento.');
+        return;
+      }
+
+      const resposta = await chamarApi({ acao: 'evento', evento: eventoId, token: token });
+      if (!resposta.ok) {
+        encerrar(resposta.expirado ? 'QR Code expirado' : 'Não foi possível abrir o formulário',
+                 resposta.erro);
+        return;
+      }
+
+      const evento = resposta.evento;
+      el('titulo').textContent = evento.titulo;
+      el('info').textContent = evento.data + ' · ' + evento.cargaHoraria
+        + 'h — confirme sua presença';
+      el('formulario').classList.remove('escondido');
+    }
+
+    async function enviar() {
+      const dados = {
+        acao: 'presenca',
+        evento: eventoId,
+        token: token,
+        nome: el('nome').value.trim(),
+        cpf: el('cpf').value.trim(),
+        matricula: el('matricula').value.trim(),
+        curso: el('curso').value,
+        periodo: el('periodo').value.trim()
+      };
+
+      if (!dados.nome || !dados.cpf || !dados.matricula || !dados.curso || !dados.periodo) {
+        mostrarMensagem('Preencha todos os campos.', 'falha');
+        return;
+      }
+
+      el('btnEnviar').disabled = true;
+      mostrarMensagem('Enviando...');
+
+      const resposta = await chamarApi(dados);
+      if (resposta.ok) {
+        el('formulario').classList.add('escondido');
+        el('mensagem').className = '';
+        el('mensagem').innerHTML = '<div class="ok">Presença confirmada com sucesso!</div>';
+        return;
+      }
+
+      el('btnEnviar').disabled = false;
+      mostrarMensagem(resposta.erro, 'falha');
+      if (resposta.expirado) {
+        // O token venceu enquanto o aluno preenchia: o formulário atual não
+        // serve mais, ele precisa escanear o código novo que está na tela.
+        encerrar('QR Code expirado', resposta.erro);
+      }
+    }
+
+    el('btnEnviar').addEventListener('click', enviar);
+    carregar();
+  </script>
+</body>
+</html>
