@@ -1,0 +1,15 @@
+# Lixo de sistema operacional
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editores
+.vscode/
+.idea/
+*.swp
+
+# Node (caso alguem instale ferramentas locais)
+node_modules/
+
+# Credenciais do clasp (NUNCA versionar)
+.clasprc.json

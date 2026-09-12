@@ -1,0 +1,481 @@
+<script>
+/**
+ * GERADOR DE QR CODE EMBUTIDO — QReventos
+ * ------------------------------------------------------------------
+ * Implementação própria da ISO/IEC 18004 (modo byte / UTF-8,
+ * versões 1 a 40, níveis de correção L, M, Q e H).
+ *
+ * Existe para que a tela de exibição NÃO dependa de CDN externo:
+ * num auditório sem internet liberada, ou com o CDN bloqueado pela
+ * rede do campus, o QR precisa continuar aparecendo.
+ *
+ * Uso:
+ *   QRDinamico.renderizar(elemento, texto, { tamanho: 320, nivel: 'M' });
+ */
+var QRDinamico = (function () {
+  'use strict';
+
+  var BITS_FORMATO = { L: 1, M: 0, Q: 3, H: 2 };
+
+  // Codewords de correção de erro por bloco — [nível][versão-1]
+  var ECC_POR_BLOCO = {
+    L: [7,10,15,20,26,18,20,24,30,18,20,24,26,30,22,24,28,30,28,28,28,28,30,30,26,28,30,30,30,30,30,30,30,30,30,30,30,30,30,30],
+    M: [10,16,26,18,24,16,18,22,22,26,30,22,22,24,24,28,28,26,26,26,26,28,28,28,28,28,28,28,28,28,28,28,28,28,28,28,28,28,28,28],
+    Q: [13,22,18,26,18,24,18,22,20,24,28,26,24,20,30,24,28,28,26,30,28,30,30,30,30,28,30,30,30,30,30,30,30,30,30,30,30,30,30,30],
+    H: [17,28,22,16,22,28,26,26,24,28,24,28,22,24,24,30,28,28,26,28,30,24,30,30,30,30,30,30,30,30,30,30,30,30,30,30,30,30,30,30]
+  };
+
+  // Quantidade de blocos de correção — [nível][versão-1]
+  var BLOCOS_ECC = {
+    L: [1,1,1,1,1,2,2,2,2,4,4,4,4,4,6,6,6,6,7,8,8,9,9,10,12,12,12,13,14,15,16,17,18,19,19,20,21,22,24,25],
+    M: [1,1,1,2,2,4,4,4,5,5,5,8,9,9,10,10,11,13,14,16,17,17,18,20,21,23,25,26,28,29,31,33,35,37,38,40,43,45,47,49],
+    Q: [1,1,2,2,4,4,6,6,8,8,8,10,12,16,12,17,16,18,21,20,23,23,25,27,29,34,34,35,38,40,43,45,48,51,53,56,59,62,65,68],
+    H: [1,1,2,4,4,4,5,6,8,8,11,11,16,16,18,16,19,21,25,25,25,34,30,32,35,37,40,42,45,48,51,54,57,60,63,66,70,74,77,81]
+  };
+
+  // ---------- utilitários de bits ----------
+
+  function bit(valor, i) {
+    return ((valor >>> i) & 1) !== 0;
+  }
+
+  function paraUtf8(texto) {
+    var bytes = [];
+    for (var i = 0; i < texto.length; i++) {
+      var c = texto.charCodeAt(i);
+      if (c < 0x80) {
+        bytes.push(c);
+      } else if (c < 0x800) {
+        bytes.push(0xC0 | (c >> 6), 0x80 | (c & 63));
+      } else if (c < 0xD800 || c >= 0xE000) {
+        bytes.push(0xE0 | (c >> 12), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
+      } else {
+        // par substituto (emoji, etc.)
+        i++;
+        var cp = 0x10000 + (((c & 0x3FF) << 10) | (texto.charCodeAt(i) & 0x3FF));
+        bytes.push(0xF0 | (cp >> 18), 0x80 | ((cp >> 12) & 63), 0x80 | ((cp >> 6) & 63), 0x80 | (cp & 63));
+      }
+    }
+    return bytes;
+  }
+
+  // ---------- tamanho da simbologia ----------
+
+  function modulosBrutos(versao) {
+    var r = (16 * versao + 128) * versao + 64;
+    if (versao >= 2) {
+      var na = Math.floor(versao / 7) + 2;
+      r -= (25 * na - 10) * na - 55;
+      if (versao >= 7) r -= 36;
+    }
+    return r;
+  }
+
+  function capacidadeDados(versao, nivel) {
+    return Math.floor(modulosBrutos(versao) / 8)
+      - ECC_POR_BLOCO[nivel][versao - 1] * BLOCOS_ECC[nivel][versao - 1];
+  }
+
+  function bitsContagem(versao) {
+    return versao <= 9 ? 8 : 16;
+  }
+
+  function posicoesAlinhamento(versao) {
+    if (versao === 1) return [];
+    var qtd = Math.floor(versao / 7) + 2;
+    var passo = (versao === 32) ? 26
+      : Math.ceil((versao * 4 + 4) / (qtd * 2 - 2)) * 2;
+    var pos = [6];
+    for (var p = versao * 4 + 10; pos.length < qtd; p -= passo) pos.splice(1, 0, p);
+    return pos;
+  }
+
+  // ---------- aritmética em GF(256) ----------
+
+  var EXP = new Array(512);
+  var LOG = new Array(256);
+  (function () {
+    var x = 1;
+    for (var i = 0; i < 255; i++) {
+      EXP[i] = x;
+      LOG[x] = i;
+      x <<= 1;
+      if (x & 0x100) x ^= 0x11D;
+    }
+    for (var j = 255; j < 512; j++) EXP[j] = EXP[j - 255];
+  })();
+
+  function multiplicar(a, b) {
+    if (a === 0 || b === 0) return 0;
+    return EXP[LOG[a] + LOG[b]];
+  }
+
+  function polinomioGerador(grau) {
+    var g = [1];
+    for (var i = 0; i < grau; i++) {
+      var novo = [];
+      for (var k = 0; k <= g.length; k++) novo.push(0);
+      for (var j = 0; j < g.length; j++) {
+        novo[j] ^= g[j];
+        novo[j + 1] ^= multiplicar(g[j], EXP[i]);
+      }
+      g = novo;
+    }
+    return g;
+  }
+
+  function calcularEcc(dados, grau) {
+    var g = polinomioGerador(grau);
+    var resto = [];
+    for (var i = 0; i < grau; i++) resto.push(0);
+    for (var d = 0; d < dados.length; d++) {
+      var fator = dados[d] ^ resto[0];
+      resto.shift();
+      resto.push(0);
+      for (var j = 0; j < grau; j++) resto[j] ^= multiplicar(g[j + 1], fator);
+    }
+    return resto;
+  }
+
+  // ---------- montagem dos codewords ----------
+
+  function escolherVersao(qtdBytes, nivel) {
+    for (var v = 1; v <= 40; v++) {
+      var bitsNecessarios = 4 + bitsContagem(v) + qtdBytes * 8;
+      if (capacidadeDados(v, nivel) * 8 >= bitsNecessarios) return v;
+    }
+    throw new Error('Texto longo demais para um QR Code (máximo ' + capacidadeDados(40, nivel) + ' bytes).');
+  }
+
+  function montarCodewords(bytes, versao, nivel) {
+    var bits = [];
+    function empurrar(valor, tamanho) {
+      for (var i = tamanho - 1; i >= 0; i--) bits.push(bit(valor, i) ? 1 : 0);
+    }
+
+    empurrar(4, 4);                               // indicador de modo: byte
+    empurrar(bytes.length, bitsContagem(versao)); // contagem de caracteres
+    for (var i = 0; i < bytes.length; i++) empurrar(bytes[i], 8);
+
+    var capacidadeBits = capacidadeDados(versao, nivel) * 8;
+    empurrar(0, Math.min(4, capacidadeBits - bits.length)); // terminador
+    empurrar(0, (8 - bits.length % 8) % 8);                 // alinha em byte
+
+    var preenchimento = [0xEC, 0x11];
+    for (var p = 0; bits.length < capacidadeBits; p++) empurrar(preenchimento[p % 2], 8);
+
+    var dados = [];
+    for (var b = 0; b < bits.length; b += 8) {
+      var octeto = 0;
+      for (var k = 0; k < 8; k++) octeto = (octeto << 1) | bits[b + k];
+      dados.push(octeto);
+    }
+    return dados;
+  }
+
+  function intercalarBlocos(dados, versao, nivel) {
+    var qtdBlocos = BLOCOS_ECC[nivel][versao - 1];
+    var eccPorBloco = ECC_POR_BLOCO[nivel][versao - 1];
+    var totalCodewords = Math.floor(modulosBrutos(versao) / 8);
+    var blocosCurtos = qtdBlocos - totalCodewords % qtdBlocos;
+    var tamanhoCurto = Math.floor(totalCodewords / qtdBlocos) - eccPorBloco;
+
+    var blocos = [];
+    for (var i = 0, offset = 0; i < qtdBlocos; i++) {
+      var tamanho = tamanhoCurto + (i < blocosCurtos ? 0 : 1);
+      var pedaco = dados.slice(offset, offset + tamanho);
+      offset += tamanho;
+      blocos.push({ dados: pedaco, ecc: calcularEcc(pedaco, eccPorBloco) });
+    }
+
+    var saida = [];
+    for (var c = 0; c < tamanhoCurto + 1; c++) {
+      for (var j = 0; j < blocos.length; j++) {
+        if (c < blocos[j].dados.length) saida.push(blocos[j].dados[c]);
+      }
+    }
+    for (var e = 0; e < eccPorBloco; e++) {
+      for (var k = 0; k < blocos.length; k++) saida.push(blocos[k].ecc[e]);
+    }
+    return saida;
+  }
+
+  // ---------- desenho da matriz ----------
+
+  function criarMatriz(versao) {
+    var tamanho = versao * 4 + 17;
+    var modulos = [];
+    var funcional = [];
+    for (var y = 0; y < tamanho; y++) {
+      var linhaM = [];
+      var linhaF = [];
+      for (var x = 0; x < tamanho; x++) {
+        linhaM.push(false);
+        linhaF.push(false);
+      }
+      modulos.push(linhaM);
+      funcional.push(linhaF);
+    }
+    return { tamanho: tamanho, modulos: modulos, funcional: funcional, versao: versao };
+  }
+
+  function definirFuncional(m, x, y, escuro) {
+    if (x < 0 || y < 0 || x >= m.tamanho || y >= m.tamanho) return;
+    m.modulos[y][x] = escuro;
+    m.funcional[y][x] = true;
+  }
+
+  function desenharLocalizador(m, cx, cy) {
+    for (var dy = -4; dy <= 4; dy++) {
+      for (var dx = -4; dx <= 4; dx++) {
+        var dist = Math.max(Math.abs(dx), Math.abs(dy));
+        definirFuncional(m, cx + dx, cy + dy, dist !== 2 && dist !== 4);
+      }
+    }
+  }
+
+  function desenharAlinhamento(m, cx, cy) {
+    for (var dy = -2; dy <= 2; dy++) {
+      for (var dx = -2; dx <= 2; dx++) {
+        definirFuncional(m, cx + dx, cy + dy, Math.max(Math.abs(dx), Math.abs(dy)) !== 1);
+      }
+    }
+  }
+
+  function desenharFormato(m, nivel, mascara) {
+    var dados = (BITS_FORMATO[nivel] << 3) | mascara;
+    var resto = dados;
+    for (var i = 0; i < 10; i++) resto = (resto << 1) ^ ((resto >> 9) * 0x537);
+    var bits = ((dados << 10) | resto) ^ 0x5412;
+
+    for (var j = 0; j <= 5; j++) definirFuncional(m, 8, j, bit(bits, j));
+    definirFuncional(m, 8, 7, bit(bits, 6));
+    definirFuncional(m, 8, 8, bit(bits, 7));
+    definirFuncional(m, 7, 8, bit(bits, 8));
+    for (var k = 9; k < 15; k++) definirFuncional(m, 14 - k, 8, bit(bits, k));
+
+    for (var a = 0; a < 8; a++) definirFuncional(m, m.tamanho - 1 - a, 8, bit(bits, a));
+    for (var b = 8; b < 15; b++) definirFuncional(m, 8, m.tamanho - 15 + b, bit(bits, b));
+    definirFuncional(m, 8, m.tamanho - 8, true); // módulo sempre escuro
+  }
+
+  function desenharVersao(m) {
+    if (m.versao < 7) return;
+    var resto = m.versao;
+    for (var i = 0; i < 12; i++) resto = (resto << 1) ^ ((resto >> 11) * 0x1F25);
+    var bits = (m.versao << 12) | resto;
+    for (var j = 0; j < 18; j++) {
+      var escuro = bit(bits, j);
+      var a = m.tamanho - 11 + j % 3;
+      var b = Math.floor(j / 3);
+      definirFuncional(m, a, b, escuro);
+      definirFuncional(m, b, a, escuro);
+    }
+  }
+
+  function desenharPadroesFuncionais(m, nivel) {
+    for (var i = 0; i < m.tamanho; i++) {
+      definirFuncional(m, 6, i, i % 2 === 0); // temporização vertical
+      definirFuncional(m, i, 6, i % 2 === 0); // temporização horizontal
+    }
+
+    desenharLocalizador(m, 3, 3);
+    desenharLocalizador(m, m.tamanho - 4, 3);
+    desenharLocalizador(m, 3, m.tamanho - 4);
+
+    var pos = posicoesAlinhamento(m.versao);
+    for (var a = 0; a < pos.length; a++) {
+      for (var b = 0; b < pos.length; b++) {
+        var canto = (a === 0 && b === 0)
+          || (a === 0 && b === pos.length - 1)
+          || (a === pos.length - 1 && b === 0);
+        if (!canto) desenharAlinhamento(m, pos[a], pos[b]);
+      }
+    }
+
+    desenharFormato(m, nivel, 0); // provisório; reescrito após escolher a máscara
+    desenharVersao(m);
+  }
+
+  function desenharCodewords(m, dados) {
+    var i = 0;
+    for (var direita = m.tamanho - 1; direita >= 1; direita -= 2) {
+      if (direita === 6) direita = 5; // pula a coluna de temporização
+      for (var vert = 0; vert < m.tamanho; vert++) {
+        for (var j = 0; j < 2; j++) {
+          var x = direita - j;
+          var subindo = ((direita + 1) & 2) === 0;
+          var y = subindo ? m.tamanho - 1 - vert : vert;
+          if (!m.funcional[y][x] && i < dados.length * 8) {
+            m.modulos[y][x] = bit(dados[i >>> 3], 7 - (i & 7));
+            i++;
+          }
+        }
+      }
+    }
+  }
+
+  function aplicarMascara(m, mascara) {
+    for (var y = 0; y < m.tamanho; y++) {
+      for (var x = 0; x < m.tamanho; x++) {
+        if (m.funcional[y][x]) continue;
+        var inverter;
+        switch (mascara) {
+          case 0: inverter = (x + y) % 2 === 0; break;
+          case 1: inverter = y % 2 === 0; break;
+          case 2: inverter = x % 3 === 0; break;
+          case 3: inverter = (x + y) % 3 === 0; break;
+          case 4: inverter = (Math.floor(x / 3) + Math.floor(y / 2)) % 2 === 0; break;
+          case 5: inverter = x * y % 2 + x * y % 3 === 0; break;
+          case 6: inverter = (x * y % 2 + x * y % 3) % 2 === 0; break;
+          case 7: inverter = ((x + y) % 2 + x * y % 3) % 2 === 0; break;
+          default: throw new Error('Máscara inválida: ' + mascara);
+        }
+        if (inverter) m.modulos[y][x] = !m.modulos[y][x];
+      }
+    }
+  }
+
+  // Proporção 1:1:3:1:1 (escuro-claro-escuro-claro-escuro), igual ao localizador
+  var PADRAO_LOCALIZADOR = [true, false, true, true, true, false, true];
+
+  /** Área de 4 módulos claros; fora da matriz conta como clara (borda do símbolo). */
+  function areaClara(sequencia, inicio, fim) {
+    for (var i = Math.max(inicio, 0); i < Math.min(fim, sequencia.length); i++) {
+      if (sequencia[i]) return false;
+    }
+    return true;
+  }
+
+  function ocorrenciasLocalizador(sequencia) {
+    var total = 0;
+    for (var i = 0; i + 7 <= sequencia.length; i++) {
+      var casa = true;
+      for (var j = 0; j < 7; j++) {
+        if (sequencia[i + j] !== PADRAO_LOCALIZADOR[j]) { casa = false; break; }
+      }
+      if (casa && (areaClara(sequencia, i - 4, i) || areaClara(sequencia, i + 7, i + 11))) {
+        total += 40;
+      }
+    }
+    return total;
+  }
+
+  function penalidade(m) {
+    var n = m.tamanho;
+    var total = 0;
+    var escuros = 0;
+    var x, y, i;
+
+    // Regra 1: sequências de 5 ou mais módulos da mesma cor
+    for (y = 0; y < n; y++) {
+      var corLinha = m.modulos[y][0], seqLinha = 1;
+      var corColuna = m.modulos[0][y], seqColuna = 1;
+      for (x = 1; x < n; x++) {
+        if (m.modulos[y][x] === corLinha) {
+          seqLinha++;
+          if (seqLinha === 5) total += 3; else if (seqLinha > 5) total += 1;
+        } else { corLinha = m.modulos[y][x]; seqLinha = 1; }
+
+        if (m.modulos[x][y] === corColuna) {
+          seqColuna++;
+          if (seqColuna === 5) total += 3; else if (seqColuna > 5) total += 1;
+        } else { corColuna = m.modulos[x][y]; seqColuna = 1; }
+      }
+    }
+
+    // Regra 2: blocos 2x2 da mesma cor
+    for (y = 0; y < n - 1; y++) {
+      for (x = 0; x < n - 1; x++) {
+        var c = m.modulos[y][x];
+        if (c === m.modulos[y][x + 1] && c === m.modulos[y + 1][x] && c === m.modulos[y + 1][x + 1]) total += 3;
+      }
+    }
+
+    // Regra 3: padrão parecido com o localizador (1:1:3:1:1 com área clara ao lado)
+    for (y = 0; y < n; y++) {
+      var coluna = [];
+      for (i = 0; i < n; i++) coluna.push(m.modulos[i][y]);
+      total += ocorrenciasLocalizador(m.modulos[y]);
+      total += ocorrenciasLocalizador(coluna);
+    }
+
+    // Regra 4: desequilíbrio entre módulos claros e escuros
+    for (y = 0; y < n; y++) {
+      for (x = 0; x < n; x++) if (m.modulos[y][x]) escuros++;
+    }
+    var percentual = escuros * 100 / (n * n);
+    total += Math.floor(Math.abs(percentual - 50) / 5) * 10;
+
+    return total;
+  }
+
+  // ---------- API pública ----------
+
+  /** Gera a matriz booleana do QR Code. Retorna { tamanho, versao, mascara, nivel, modulos }. */
+  function gerar(texto, nivel, mascaraFixa) {
+    nivel = nivel || 'M';
+    if (!ECC_POR_BLOCO[nivel]) throw new Error('Nível de correção inválido: ' + nivel);
+
+    var bytes = paraUtf8(String(texto));
+    var versao = escolherVersao(bytes.length, nivel);
+    var codewords = intercalarBlocos(montarCodewords(bytes, versao, nivel), versao, nivel);
+
+    var inicio = (mascaraFixa === undefined || mascaraFixa === null) ? 0 : mascaraFixa;
+    var fim = (mascaraFixa === undefined || mascaraFixa === null) ? 7 : mascaraFixa;
+
+    var melhor = null;
+    for (var mascara = inicio; mascara <= fim; mascara++) {
+      var m = criarMatriz(versao);
+      desenharPadroesFuncionais(m, nivel);
+      desenharCodewords(m, codewords);
+      aplicarMascara(m, mascara);
+      desenharFormato(m, nivel, mascara);
+      var nota = penalidade(m);
+      if (melhor === null || nota < melhor.nota) melhor = { nota: nota, matriz: m, mascara: mascara };
+    }
+
+    return {
+      tamanho: melhor.matriz.tamanho,
+      versao: versao,
+      mascara: melhor.mascara,
+      nivel: nivel,
+      modulos: melhor.matriz.modulos
+    };
+  }
+
+  /** Converte a matriz em SVG — nítido em qualquer tamanho, ideal para projeção. */
+  function paraSvg(qr, opcoes) {
+    opcoes = opcoes || {};
+    var tamanho = opcoes.tamanho || 300;
+    var margem = opcoes.margem === undefined ? 4 : opcoes.margem; // zona de silêncio exigida pela norma
+    var corEscura = opcoes.corEscura || '#000000';
+    var corClara = opcoes.corClara || '#ffffff';
+    var lado = qr.tamanho + margem * 2;
+
+    var caminho = [];
+    for (var y = 0; y < qr.tamanho; y++) {
+      for (var x = 0; x < qr.tamanho; x++) {
+        if (qr.modulos[y][x]) caminho.push('M' + (x + margem) + ',' + (y + margem) + 'h1v1h-1z');
+      }
+    }
+
+    return '<svg xmlns="http://www.w3.org/2000/svg" width="' + tamanho + '" height="' + tamanho +
+      '" viewBox="0 0 ' + lado + ' ' + lado + '" shape-rendering="crispEdges" role="img" aria-label="QR Code de presenca">' +
+      '<rect width="' + lado + '" height="' + lado + '" fill="' + corClara + '"/>' +
+      '<path d="' + caminho.join('') + '" fill="' + corEscura + '"/></svg>';
+  }
+
+  /** Desenha o QR Code dentro de um elemento da página. */
+  function renderizar(elemento, texto, opcoes) {
+    opcoes = opcoes || {};
+    var qr = gerar(texto, opcoes.nivel);
+    elemento.innerHTML = paraSvg(qr, opcoes);
+    return qr;
+  }
+
+  return { gerar: gerar, paraSvg: paraSvg, renderizar: renderizar };
+})();
+
+if (typeof module !== 'undefined' && module.exports) module.exports = QRDinamico;
+</script>

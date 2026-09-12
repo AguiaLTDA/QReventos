@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <?!= include('QRCode') ?>
+  <style>
+    body { font-family: 'Segoe UI', Arial, sans-serif; background: #111827; color: #fff; text-align: center; margin: 0; padding: 40px 16px; }
+    h1 { font-size: 26px; margin-bottom: 4px; }
+    .info { color: #9ca3af; margin-bottom: 24px; }
+    #qr { display: inline-block; padding: 16px; background: #fff; border-radius: 16px; line-height: 0; }
+    #qr svg { width: min(60vmin, 420px); height: auto; }
+    .contador { margin-top: 18px; font-size: 15px; color: #93c5fd; }
+    .erro { margin-top: 14px; font-size: 14px; color: #fca5a5; min-height: 20px; }
+  </style>
+</head>
+<body>
+  <? if (!evento) { ?>
+    <h1>Evento não encontrado</h1>
+  <? } else { ?>
+    <h1><?= evento.titulo ?></h1>
+    <div class="info"><?= evento.data ?> · <?= evento.cargaHoraria ?>h — escaneie para confirmar presença</div>
+    <div id="qr"></div>
+    <div class="contador">Atualiza em <span id="segundos">60</span>s</div>
+    <div id="erro" class="erro"></div>
+  <? } ?>
+
+  <script>
+    const eventoId = "<?= eventoId ?>";
+    const baseUrl = "<?= baseUrl ?>";
+    let timerContagem = null;
+
+    function mostrarErro(texto) {
+      document.getElementById('erro').innerText = texto;
+    }
+
+    function montarQr(token) {
+      const url = baseUrl + '?page=form&evento=' + eventoId + '&token=' + token;
+      // Nível M: tolera ~15% de dano, suficiente para telão, reflexo e foto de longe.
+      QRDinamico.renderizar(document.getElementById('qr'), url, { nivel: 'M', tamanho: 420 });
+    }
+
+    function iniciarContagem(segundos) {
+      if (timerContagem) clearInterval(timerContagem);
+      let restante = segundos;
+      document.getElementById('segundos').innerText = restante;
+      timerContagem = setInterval(function () {
+        restante--;
+        document.getElementById('segundos').innerText = Math.max(restante, 0);
+        if (restante <= 0) clearInterval(timerContagem);
+      }, 1000);
+    }
+
+    function atualizar() {
+      google.script.run
+        .withSuccessHandler(function (resp) {
+          try {
+            montarQr(resp.token);
+            mostrarErro('');
+          } catch (e) {
+            mostrarErro('Não foi possível desenhar o QR Code: ' + e.message);
+            return;
+          }
+          iniciarContagem(resp.segundosRestantes);
+          // Reagenda no fim da janela do token do servidor, em vez de a cada 60s
+          // corridos: sem isso o relógio da tela vai saindo de sincronia com o
+          // servidor e o QR exibido passa a ser o da janela anterior.
+          setTimeout(atualizar, resp.segundosRestantes * 1000 + 500);
+        })
+        .withFailureHandler(function (err) {
+          mostrarErro('Falha ao obter o token: ' + err.message + '. Nova tentativa em 5s.');
+          setTimeout(atualizar, 5000);
+        })
+        .gerarTokenAtual(eventoId);
+    }
+
+    <? if (evento) { ?>
+    atualizar();
+    <? } ?>
+  </script>
+</body>
+</html>

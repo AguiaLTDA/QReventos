@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    body { font-family: 'Segoe UI', Arial, sans-serif; background: #f4f6f8; margin: 0; padding: 20px; color: #1f2937; }
+    .card { background: #fff; border-radius: 12px; padding: 20px; max-width: 480px; margin: 0 auto; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+    h1 { font-size: 19px; margin-bottom: 2px; }
+    .sub { color: #6b7280; font-size: 13px; margin-bottom: 16px; }
+    label { display: block; font-size: 13px; font-weight: 600; margin: 12px 0 4px; }
+    input, select { width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 8px; box-sizing: border-box; font-size: 14px; }
+    button { margin-top: 18px; background: #2563eb; color: #fff; border: none; padding: 13px 18px; border-radius: 8px; font-size: 15px; cursor: pointer; width: 100%; }
+    button:hover { background: #1d4ed8; }
+    .aviso { background: #fef2f2; color: #b91c1c; padding: 14px; border-radius: 10px; font-size: 14px; }
+    .ok { background: #f0fdf4; color: #15803d; padding: 14px; border-radius: 10px; font-size: 14px; text-align: center; }
+    #msg { margin-top: 10px; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <? if (!valido) { ?>
+      <div class="aviso">Este QR Code expirou ou é inválido. Volte à tela do evento e escaneie o código atual.</div>
+    <? } else if (!evento) { ?>
+      <div class="aviso">Evento não encontrado.</div>
+    <? } else { ?>
+      <h1><?= evento.titulo ?></h1>
+      <div class="sub"><?= evento.data ?> · <?= evento.cargaHoraria ?>h — confirme sua presença</div>
+
+      <div id="form">
+        <label>Nome completo</label>
+        <input id="nome">
+        <label>CPF</label>
+        <input id="cpf" placeholder="000.000.000-00">
+        <label>Matrícula</label>
+        <input id="matricula">
+        <label>Curso</label>
+        <select id="curso">
+          <option value="">Selecione</option>
+          <option>Administração</option>
+          <option>Ciências Contábeis</option>
+          <option>Engenharia de Produção</option>
+          <option>Medicina Veterinária</option>
+          <option>Agronomia</option>
+          <option>Direito</option>
+          <option>Engenharia Mecânica</option>
+          <option>Odontologia</option>
+          <option>Análise e Desenvolvimento de Sistemas</option>
+          <option>Educação Física</option>
+          <option>Farmácia</option>
+          <option>Psicologia</option>
+          <option>Arquitetura e Urbanismo</option>
+          <option>Enfermagem</option>
+          <option>Fisioterapia</option>
+          <option>Publicidade e Propaganda</option>
+        </select>
+        <label>Período</label>
+        <input id="periodo" placeholder="Ex: 3º período">
+        <button onclick="enviar()">Confirmar presença</button>
+      </div>
+      <div id="msg"></div>
+    <? } ?>
+  </div>
+
+  <script>
+    const eventoId = "<?= eventoId ?>";
+    const token = "<?= token ?>";
+
+    function enviar() {
+      const nome = document.getElementById('nome').value.trim();
+      const cpf = document.getElementById('cpf').value.trim();
+      const matricula = document.getElementById('matricula').value.trim();
+      const curso = document.getElementById('curso').value;
+      const periodo = document.getElementById('periodo').value.trim();
+
+      if (!nome || !cpf || !matricula || !curso || !periodo) {
+        document.getElementById('msg').innerHTML = '<span style="color:#dc2626">Preencha todos os campos.</span>';
+        return;
+      }
+
+      document.getElementById('msg').innerText = 'Enviando...';
+      google.script.run
+        .withSuccessHandler(function (resp) {
+          if (resp.ok) {
+            document.getElementById('form').style.display = 'none';
+            document.getElementById('msg').innerHTML = '<div class="ok">Presença confirmada com sucesso!</div>';
+          } else {
+            document.getElementById('msg').innerHTML = '<span style="color:#dc2626">' + resp.erro + '</span>';
+          }
+        })
+        .withFailureHandler(function (err) {
+          document.getElementById('msg').innerHTML = '<span style="color:#dc2626">Erro: ' + err.message + '</span>';
+        })
+        .registrarPresenca({ eventoId: eventoId, token: token, nome: nome, cpf: cpf, matricula: matricula, curso: curso, periodo: periodo });
+    }
+  </script>
+</body>
+</html>
