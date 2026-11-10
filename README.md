@@ -21,8 +21,14 @@ GitHub Pages (docs/)          Apps Script (/exec)          Google Sheets
 - Ao abrir o formulário com um QR válido, o aluno recebe uma **sessão** assinada que vale
   15 minutos (`SESSAO_MINUTOS`). É ela que autoriza o envio, então quem escaneia no fim do
   minuto não perde a presença por demorar para digitar.
-- Duplicidade (mesmo CPF no mesmo evento) é bloqueada, com `LockService` para que
-  duas submissões simultâneas não escapem da checagem. Telefone e CPF são gravados como
+- A mesma pessoa (mesmo CPF) pode registrar presença **mais de uma vez no mesmo evento** —
+  por exemplo, na entrada e na saída —, desde que haja pelo menos 30 minutos
+  (`INTERVALO_MINIMO_MINUTOS`) desde o registro anterior. Envios mais próximos que isso são
+  recusados com o horário em que o próximo passa a ser aceito. Um `LockService` impede que
+  duas submissões simultâneas escapem da checagem.
+- Cada registro ganha um **ID automático** de 8 caracteres (ex.: `A3F09C1E`), mostrado ao aluno
+  como comprovante, e o **número do registro** daquela pessoa no evento (1 = entrada, 2 = saída...).
+- O contador da tela do QR mostra **pessoas** (CPFs distintos), não registros. Telefone e CPF são gravados como
   texto, para não perder zeros à esquerda. O CPF é conferido pelo dígito verificador.
 - O QR ocupa quase a altura toda da tela e leva um link curto (`?e=<8 primeiros caracteres do
   ID>&t=<token>`), o que deixa cada módulo maior e legível de mais longe.
@@ -94,10 +100,11 @@ editor não atualiza a URL `/exec`.
 ## Estrutura da planilha (criada automaticamente no primeiro uso)
 
 **Aba "Eventos":** ID, Título, Data, Carga Horária, Criado em
-**Aba "Presencas":** Timestamp, EventoID, Evento, Data do Evento, Carga Horária, Nome, Telefone, CPF, Curso, Turma
+**Aba "Presencas":** Timestamp, EventoID, Evento, Data do Evento, Carga Horária, Nome, Telefone, CPF, Curso, Turma, ID do Registro, Nº do Registro
 
 Planilhas criadas antes desta versão mantêm as colunas no lugar: o cabeçalho de G e J vira
-"Telefone (antes: Matrícula)" e "Turma (antes: Período)" no primeiro registro novo.
+"Telefone (antes: Matrícula)" e "Turma (antes: Período)" no primeiro registro novo, e as colunas
+K e L ganham o cabeçalho de ID e Nº do registro.
 
 ## API
 

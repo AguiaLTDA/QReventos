@@ -36,6 +36,11 @@ const JANELA_TOKEN_SEGUNDOS = 60; // QR muda a cada 60s
 const TOLERANCIA_MINUTOS = 1;     // aceita o token do minuto atual e do anterior
 const SESSAO_MINUTOS = 15;        // tempo que o aluno tem para enviar o formulário depois de escanear
 const CAMPOS_PRESENCA = ['nome', 'telefone', 'cpf', 'curso', 'turma'];
+// A mesma pessoa pode registrar presença mais de uma vez no mesmo evento
+// (ex.: entrada e saída), desde que respeitado este intervalo entre um
+// registro e o seguinte. Impede o envio repetido por engano no mesmo momento.
+const INTERVALO_MINIMO_MINUTOS = 30;
+const COLUNAS_PRESENCA = 12;
 
 // ============ ROTEAMENTO HTTP ============
 
@@ -163,14 +168,20 @@ function dadosDoEvento_(eventoId, token) {
   return { ok: true, evento: evento, sessao: gerarSessao_(evento.id), sessaoMinutos: SESSAO_MINUTOS };
 }
 
+/**
+ * Quantas PESSOAS (CPFs distintos) já registraram presença no evento. Quem
+ * registrou entrada e saída conta uma vez só.
+ */
 function contarPresencas_(eventoId) {
   const sheet = pegarAba_(ABA_PRESENCAS);
   const quantidade = sheet.getLastRow() - 1;
   if (quantidade <= 0) return 0;
-  const ids = sheet.getRange(2, 2, quantidade, 1).getValues(); // só a coluna EventoID
-  let total = 0;
-  for (let i = 0; i < ids.length; i++) if (ids[i][0] === eventoId) total++;
-  return total;
+  const linhas = sheet.getRange(2, 2, quantidade, 7).getValues(); // colunas B (EventoID) a H (CPF)
+  const pessoas = {};
+  for (let i = 0; i < linhas.length; i++) {
+    if (linhas[i][0] === eventoId) pessoas[chaveCpf_(linhas[i][6])] = true;
+  }
+  return Object.keys(pessoas).length;
 }
 
 // ============ PRESENÇA ============
@@ -200,7 +211,7 @@ function registrarPresenca_(dados) {
   }
 
   // Sem o lock, duas submissões simultâneas do mesmo CPF passam as duas
-  // pela checagem de duplicidade antes de qualquer uma gravar.
+  // pela checagem de intervalo antes de qualquer uma gravar.
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(15000)) {
     return { ok: false, erro: 'Sistema ocupado no momento. Tente de novo em alguns segundos.' };
@@ -210,11 +221,35 @@ function registrarPresenca_(dados) {
     const sheet = pegarAba_(ABA_PRESENCAS);
     atualizarCabecalhoPresencas_(sheet);
     const linhas = sheet.getDataRange().getValues();
+    const agora = new Date();
+
+    // Registros anteriores desta pessoa neste evento, e todos os IDs já usados.
+    let anteriores = 0;
+    let ultimo = null;
+    const idsUsados = {};
     for (let i = 1; i < linhas.length; i++) {
+      if (linhas[i][10]) idsUsados[String(linhas[i][10])] = true;
       if (linhas[i][1] === evento.id && chaveCpf_(linhas[i][7]) === cpf) {
-        return { ok: false, erro: 'Presença já registrada para este CPF neste evento.' };
+        anteriores++;
+        const quando = linhas[i][0] instanceof Date ? linhas[i][0] : new Date(linhas[i][0]);
+        if (!isNaN(quando) && (!ultimo || quando > ultimo)) ultimo = quando;
       }
     }
+
+    if (ultimo) {
+      const liberaEm = new Date(ultimo.getTime() + INTERVALO_MINIMO_MINUTOS * 60 * 1000);
+      if (agora < liberaEm) {
+        return {
+          ok: false,
+          erro: 'Você já registrou presença neste evento às ' + hora_(ultimo)
+            + '. Um novo registro (por exemplo, a saída) só é aceito a partir das '
+            + hora_(liberaEm) + '.'
+        };
+      }
+    }
+
+    const idRegistro = novoIdRegistro_(idsUsados);
+    const numero = anteriores + 1;
 
     // appendRow converte "01234567890" no número 1234567890, e o zero à
     // esquerda some. Formatando a linha como texto antes de gravar, o valor
@@ -222,10 +257,11 @@ function registrarPresenca_(dados) {
     const proxima = sheet.getLastRow() + 1;
     // Diferente de appendRow, getRange não cria linhas: a aba nasce com 1000.
     if (proxima > sheet.getMaxRows()) sheet.insertRowsAfter(sheet.getMaxRows(), 500);
-    const destino = sheet.getRange(proxima, 1, 1, 10);
+    const destino = sheet.getRange(proxima, 1, 1, COLUNAS_PRESENCA);
     destino.offset(0, 6, 1, 2).setNumberFormat('@'); // Telefone e CPF
+    destino.offset(0, 10, 1, 1).setNumberFormat('@'); // ID ("12E45678" viraria número)
     destino.setValues([[
-      new Date(),
+      agora,
       evento.id,
       evento.titulo,
       evento.data,
@@ -234,14 +270,33 @@ function registrarPresenca_(dados) {
       formatarTelefone_(telefone),
       formatarCpf_(cpf),
       String(dados.curso).trim(),
-      String(dados.turma).trim()
+      String(dados.turma).trim(),
+      idRegistro,
+      numero
     ]]);
     SpreadsheetApp.flush(); // grava antes de soltar o lock, para a próxima checagem já enxergar esta linha
+
+    return { ok: true, idRegistro: idRegistro, numero: numero, hora: hora_(agora) };
   } finally {
     lock.releaseLock();
   }
+}
 
-  return { ok: true };
+/**
+ * ID automático de cada registro de presença: 8 caracteres (A-F, 0-9),
+ * curto para o aluno anotar como comprovante. Gerado dentro do lock e
+ * conferido contra os já existentes, então nunca se repete.
+ */
+function novoIdRegistro_(idsUsados) {
+  let id;
+  do {
+    id = Utilities.getUuid().replace(/-/g, '').substring(0, 8).toUpperCase();
+  } while (idsUsados[id]);
+  return id;
+}
+
+function hora_(data) {
+  return Utilities.formatDate(data, Session.getScriptTimeZone(), 'HH:mm');
 }
 
 /**
@@ -253,6 +308,10 @@ function atualizarCabecalhoPresencas_(sheet) {
   if (sheet.getRange('G1').getValue() === 'Matrícula') {
     sheet.getRange('G1').setValue('Telefone (antes: Matrícula)');
     sheet.getRange('J1').setValue('Turma (antes: Período)');
+  }
+  // Colunas K e L chegaram depois: planilhas antigas ganham o cabeçalho.
+  if (!sheet.getRange('K1').getValue()) {
+    sheet.getRange('K1:L1').setValues([['ID do Registro', 'Nº do Registro']]);
   }
 }
 
@@ -379,8 +438,9 @@ function pegarAba_(nome) {
     if (nome === ABA_EVENTOS) {
       sheet.appendRow(['ID', 'Título', 'Data', 'Carga Horária', 'Criado em']);
     } else if (nome === ABA_PRESENCAS) {
-      sheet.appendRow(['Timestamp', 'EventoID', 'Evento', 'Data do Evento', 'Carga Horária', 'Nome', 'Telefone', 'CPF', 'Curso', 'Turma']);
+      sheet.appendRow(['Timestamp', 'EventoID', 'Evento', 'Data do Evento', 'Carga Horária', 'Nome', 'Telefone', 'CPF', 'Curso', 'Turma', 'ID do Registro', 'Nº do Registro']);
       sheet.getRange('G:H').setNumberFormat('@'); // Telefone e CPF como texto
+      sheet.getRange('K:K').setNumberFormat('@'); // ID do registro como texto
     }
   }
   return sheet;

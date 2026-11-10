@@ -41,6 +41,11 @@
     <h1>Presença confirmada!</h1>
     <p class="destaque">Parabéns, você está investindo em seu desenvolvimento profissional.</p>
     <p class="detalhe" id="detalhe"></p>
+    <div class="comprovante escondido" id="blocoComprovante">
+      <span class="rotulo">Comprovante</span>
+      <strong id="comprovante"></strong>
+      <span class="rotulo" id="numeroRegistro"></span>
+    </div>
   </div>
 
   <script src="config.js"></script>
@@ -118,11 +123,18 @@
       el('formulario').classList.add('escondido');
     }
 
-    function mostrarParabens(nome) {
-      const agora = new Date();
-      const hora = agora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    function mostrarParabens(nome, resposta) {
+      const hora = resposta.hora
+        || new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
       el('detalhe').textContent = nome.split(' ')[0] + ', sua presença em "' + tituloEvento
         + '" foi registrada às ' + hora + '.';
+      if (resposta.idRegistro) {
+        el('comprovante').textContent = resposta.idRegistro;
+        el('numeroRegistro').textContent = resposta.numero === 1
+          ? '1º registro neste evento'
+          : resposta.numero + 'º registro neste evento (por exemplo, a saída)';
+        el('blocoComprovante').classList.remove('escondido');
+      }
       el('cartao').classList.add('escondido');
       el('parabens').classList.remove('escondido');
       window.scrollTo(0, 0);
@@ -189,7 +201,7 @@
 
       const resposta = await chamarApi(dados);
       if (resposta.ok) {
-        mostrarParabens(dados.nome);
+        mostrarParabens(dados.nome, resposta);
         return;
       }
 

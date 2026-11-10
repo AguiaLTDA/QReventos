@@ -23,7 +23,7 @@
       <div class="progresso escondido" id="blocoProgresso"><div class="barra" id="barra"></div></div>
       <div class="contador escondido" id="blocoContador"></div>
       <div class="total escondido" id="blocoTotal">
-        <strong id="total">0</strong> <span id="rotuloTotal">presenças registradas</span>
+        <strong id="total">0</strong> <span id="rotuloTotal">pessoas registradas</span>
       </div>
       <div class="mensagem" id="mensagem"></div>
     </aside>
@@ -120,7 +120,7 @@
       const resposta = await chamarComoAdmin({ acao: 'contarPresencas', evento: eventoId });
       if (resposta.ok) {
         el('total').textContent = resposta.total;
-        el('rotuloTotal').textContent = resposta.total === 1 ? 'presença registrada' : 'presenças registradas';
+        el('rotuloTotal').textContent = resposta.total === 1 ? 'pessoa registrada' : 'pessoas registradas';
         el('blocoTotal').classList.remove('escondido');
         if (totalAnterior !== null && resposta.total > totalAnterior) {
           // Reinicia a animação de destaque a cada nova presença.
