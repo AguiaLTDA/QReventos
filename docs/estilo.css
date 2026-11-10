@@ -94,23 +94,136 @@ a { color: var(--acao); font-weight: 600; }
 
 /* ---------- tela de projeção ---------- */
 
+/*
+ * O QR ocupa quase toda a altura da tela (telão em paisagem) e as informações
+ * ficam ao lado. Quanto maior cada "quadradinho" do QR, de mais longe o
+ * celular consegue ler.
+ */
 body.projecao {
   background: #111827;
   color: #fff;
-  text-align: center;
-  padding: 40px 16px;
+  padding: 2vmin;
+  min-height: 100vh;
+  overflow: hidden;
 }
-body.projecao h1 { font-size: 26px; }
-body.projecao .info { color: #9ca3af; margin-bottom: 24px; }
+
+.palco {
+  min-height: 96vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4vmin;
+}
+
+.moldura { position: relative; flex: none; }
 
 #qr {
-  display: inline-block;
-  padding: 16px;
+  /* Sem padding: o SVG já traz a margem branca (zona de silêncio) exigida pela norma. */
   background: #fff;
-  border-radius: 16px;
+  border-radius: 1.5vmin;
   line-height: 0;
+  overflow: hidden;
+  transition: opacity 0.4s;
 }
-#qr svg { width: min(60vmin, 420px); height: auto; }
+#qr svg { display: block; width: min(94vh, 62vw); height: auto; }
 
-.contador { margin-top: 18px; font-size: 15px; color: #93c5fd; }
-.projecao .mensagem { color: #fca5a5; min-height: 20px; margin-top: 14px; }
+.lateral { max-width: 34vw; text-align: left; }
+.lateral h1 { font-size: clamp(24px, 4.2vmin, 64px); line-height: 1.15; margin-bottom: 1.5vmin; }
+.lateral .info { color: #9ca3af; font-size: clamp(14px, 2.2vmin, 30px); }
+.lateral .instrucao { font-size: clamp(18px, 3vmin, 42px); color: #e5e7eb; margin: 4vmin 0 3vmin; }
+
+@media (orientation: portrait) {
+  .palco { flex-direction: column; }
+  #qr svg { width: min(94vw, 64vh); }
+  .lateral { max-width: none; text-align: center; }
+  .lateral .instrucao { margin: 2vmin 0; }
+}
+
+/* QR que o servidor já não aceita: apagado, com aviso por cima. */
+.selo-vencido {
+  display: none;
+  position: absolute;
+  inset: 0;
+  align-items: center;
+  justify-content: center;
+  font-size: clamp(20px, 4vmin, 48px);
+  font-weight: 600;
+  color: #fff;
+}
+.moldura.vencido #qr { opacity: 0.12; }
+.moldura.vencido .selo-vencido { display: flex; }
+
+.progresso {
+  width: 100%;
+  height: 1vmin;
+  min-height: 6px;
+  background: #374151;
+  border-radius: 1vmin;
+  overflow: hidden;
+}
+.progresso .barra {
+  height: 100%;
+  width: 100%;
+  background: #60a5fa;
+  transition: width 0.25s linear;
+}
+
+.contador { margin-top: 1vmin; font-size: clamp(14px, 2vmin, 26px); color: #93c5fd; }
+
+.total { margin-top: 4vmin; font-size: clamp(16px, 2.4vmin, 32px); color: #d1d5db; }
+.total strong { font-size: clamp(30px, 6vmin, 84px); color: #fff; display: block; line-height: 1.1; }
+.total.subiu strong { animation: subiu 0.8s ease-out; }
+@keyframes subiu {
+  0% { color: #4ade80; }
+  100% { color: #fff; }
+}
+
+.projecao .mensagem { color: #fca5a5; min-height: 20px; margin-top: 2vmin; font-size: clamp(13px, 1.8vmin, 24px); }
+
+button.tela-cheia {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  width: auto;
+  margin: 0;
+  padding: 8px 14px;
+  font-size: 13px;
+  background: #1f2937;
+  color: #d1d5db;
+  border: 1px solid #374151;
+  opacity: 0.6;
+  z-index: 1;
+}
+button.tela-cheia:hover { opacity: 1; background: #374151; }
+:fullscreen button.tela-cheia { opacity: 0.15; }
+:fullscreen button.tela-cheia:hover { opacity: 1; }
+
+/* ---------- confirmação de presença ---------- */
+
+.parabens {
+  text-align: center;
+  padding: 36px 24px;
+  animation: aparecer 0.45s ease-out;
+}
+.parabens h1 { font-size: 24px; color: var(--sucesso); margin-top: 14px; }
+.parabens .destaque { font-size: 18px; font-weight: 600; margin: 14px 0 10px; }
+.parabens .detalhe { color: var(--apagado); font-size: 14px; margin: 0; }
+
+.selo-ok {
+  width: 72px;
+  height: 72px;
+  margin: 0 auto;
+  border-radius: 50%;
+  background: var(--sucesso);
+  color: #fff;
+  font-size: 40px;
+  line-height: 72px;
+}
+
+@keyframes aparecer {
+  from { opacity: 0; transform: translateY(12px) scale(0.97); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .parabens { animation: none; }
+}

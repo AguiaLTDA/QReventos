@@ -18,8 +18,17 @@ GitHub Pages (docs/)          Apps Script (/exec)          Google Sheets
   de funcionar depois de ~2 minutos.
 - O aluno escaneia, cai em `presenca.html`, preenche os dados, e a linha vai para a aba
   "Presencas" da planilha.
-- Duplicidade (mesma matrícula no mesmo evento) é bloqueada, com `LockService` para que
-  duas submissões simultâneas não escapem da checagem.
+- Ao abrir o formulário com um QR válido, o aluno recebe uma **sessão** assinada que vale
+  15 minutos (`SESSAO_MINUTOS`). É ela que autoriza o envio, então quem escaneia no fim do
+  minuto não perde a presença por demorar para digitar.
+- Duplicidade (mesmo CPF no mesmo evento) é bloqueada, com `LockService` para que
+  duas submissões simultâneas não escapem da checagem. Telefone e CPF são gravados como
+  texto, para não perder zeros à esquerda. O CPF é conferido pelo dígito verificador.
+- O QR ocupa quase a altura toda da tela e leva um link curto (`?e=<8 primeiros caracteres do
+  ID>&t=<token>`), o que deixa cada módulo maior e legível de mais longe.
+- A tela do QR tem botão de tela cheia (ou tecla **F**), pede ao navegador para não apagar a
+  tela, mostra quantas presenças já foram registradas e apaga o QR se perder a conexão por
+  tempo suficiente para o código exibido deixar de valer.
 
 O desenho do QR é feito por um **gerador próprio** (`docs/qrcode.js`), sem CDN e sem
 biblioteca externa: num auditório com internet restrita ou com o CDN bloqueado pela rede do
@@ -35,7 +44,7 @@ campus, a tela continua funcionando. A saída é SVG, nítido em qualquer tamanh
 | `docs/presenca.html` | Formulário do aluno |
 | `docs/qrcode.js` | Gerador de QR Code (ISO/IEC 18004), sem dependências |
 | `docs/api.js` | Chamadas à API e guarda da chave administrativa |
-| `docs/config.js` | **Onde você cola a URL da sua implantação** |
+| `docs/config.js` | **Onde você cola a URL da sua implantação** e edita as listas de cursos e turmas |
 | `testes/` | Teste de regressão do gerador de QR Code |
 
 ## Instalação
@@ -85,7 +94,10 @@ editor não atualiza a URL `/exec`.
 ## Estrutura da planilha (criada automaticamente no primeiro uso)
 
 **Aba "Eventos":** ID, Título, Data, Carga Horária, Criado em
-**Aba "Presencas":** Timestamp, EventoID, Evento, Data do Evento, Carga Horária, Nome, Matrícula, CPF, Curso, Período
+**Aba "Presencas":** Timestamp, EventoID, Evento, Data do Evento, Carga Horária, Nome, Telefone, CPF, Curso, Turma
+
+Planilhas criadas antes desta versão mantêm as colunas no lugar: o cabeçalho de G e J vira
+"Telefone (antes: Matrícula)" e "Turma (antes: Período)" no primeiro registro novo.
 
 ## API
 
@@ -99,8 +111,10 @@ a chave administrativa e o CPF não fiquem em log de servidor nem no histórico 
 | `listarEventos` | `chave` | `{ ok, eventos[] }` |
 | `criarEvento` | `chave`, `titulo`, `data`, `cargaHoraria` | `{ ok, id }` |
 | `token` | `chave`, `evento` | `{ ok, token, segundosRestantes }` |
-| `evento` | `evento`, `token` | `{ ok, evento }` |
-| `presenca` | `evento`, `token` + dados do aluno | `{ ok }` |
+| `eventoAdmin` | `chave`, `evento` | `{ ok, evento }` |
+| `contarPresencas` | `chave`, `evento` | `{ ok, total }` |
+| `evento` | `evento`, `token` | `{ ok, evento, sessao, sessaoMinutos }` |
+| `presenca` | `evento`, `sessao` (ou `token` ainda válido) + dados do aluno | `{ ok }` |
 
 ## Testes
 
@@ -123,12 +137,10 @@ limite exato da capacidade e conteúdo acentuado em UTF-8.
   "Sair deste computador" ao terminar.
 - **A validação é temporal, não geográfica.** Quem receber prints do QR em tempo real ainda
   consegue registrar presença de fora do evento.
-- **CPF é aceito como texto livre**, sem validação de dígito verificador.
 - **Trocar `TOKEN_SECRET` invalida os QRs em exibição.** Faça fora do horário de um evento.
 
 ## Possíveis evoluções
 
 - Exportar relatório de presença por evento em PDF direto da planilha.
-- Validar CPF com dígito verificador antes de aceitar.
 - Restringir o formulário por faixa de IP/geolocalização do campus.
-- Puxar a lista de "Curso" de uma aba de configuração, em vez de fixa no HTML.
+- Puxar as listas de curso e turma de uma aba da planilha, em vez de `docs/config.js`.

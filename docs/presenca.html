@@ -8,48 +8,39 @@
   <link rel="stylesheet" href="estilo.css">
 </head>
 <body>
-  <div class="cartao">
+  <div class="cartao" id="cartao">
     <h1 id="titulo">Verificando o QR Code...</h1>
     <div class="sub" id="info"></div>
 
-    <div id="formulario" class="escondido">
+    <form id="formulario" class="escondido" novalidate>
       <label for="nome">Nome completo</label>
-      <input id="nome" autocomplete="name">
+      <input id="nome" autocomplete="name" required>
+
+      <label for="telefone">Telefone (com DDD)</label>
+      <input id="telefone" type="tel" inputmode="numeric" autocomplete="tel-national"
+             placeholder="(00) 00000-0000" maxlength="15" required>
 
       <label for="cpf">CPF</label>
-      <input id="cpf" inputmode="numeric" placeholder="000.000.000-00">
-
-      <label for="matricula">Matrícula</label>
-      <input id="matricula" inputmode="numeric">
+      <input id="cpf" inputmode="numeric" placeholder="000.000.000-00" maxlength="14" required>
 
       <label for="curso">Curso</label>
-      <select id="curso">
-        <option value="">Selecione</option>
-        <option>Administração</option>
-        <option>Agronomia</option>
-        <option>Análise e Desenvolvimento de Sistemas</option>
-        <option>Arquitetura e Urbanismo</option>
-        <option>Ciências Contábeis</option>
-        <option>Direito</option>
-        <option>Educação Física</option>
-        <option>Enfermagem</option>
-        <option>Engenharia de Produção</option>
-        <option>Engenharia Mecânica</option>
-        <option>Farmácia</option>
-        <option>Fisioterapia</option>
-        <option>Medicina Veterinária</option>
-        <option>Odontologia</option>
-        <option>Psicologia</option>
-        <option>Publicidade e Propaganda</option>
-      </select>
+      <select id="curso" required></select>
 
-      <label for="periodo">Período</label>
-      <input id="periodo" placeholder="Ex: 3º período">
+      <label for="turma">Turma</label>
+      <select id="turma" required></select>
 
-      <button id="btnEnviar">Confirmar presença</button>
-    </div>
+      <button id="btnEnviar" type="submit">Confirmar presença</button>
+    </form>
 
     <div class="mensagem" id="mensagem"></div>
+  </div>
+
+  <!-- Aparece no lugar do formulário quando a presença é gravada. -->
+  <div class="cartao parabens escondido" id="parabens" role="status" aria-live="polite">
+    <div class="selo-ok" aria-hidden="true">✓</div>
+    <h1>Presença confirmada!</h1>
+    <p class="destaque">Parabéns, você está investindo em seu desenvolvimento profissional.</p>
+    <p class="detalhe" id="detalhe"></p>
   </div>
 
   <script src="config.js"></script>
@@ -57,8 +48,63 @@
   <script>
     const el = (id) => document.getElementById(id);
     const parametros = new URLSearchParams(location.search);
-    const eventoId = parametros.get('evento') || '';
-    const token = parametros.get('token') || '';
+    // "e" e "t" são os nomes curtos usados pelo QR; "evento" e "token" ficam
+    // aceitos para links gerados antes.
+    let eventoId = parametros.get('e') || parametros.get('evento') || '';
+    const token = parametros.get('t') || parametros.get('token') || '';
+    let sessao = ''; // devolvida pelo servidor ao abrir o formulário; dá tempo para preencher
+    let tituloEvento = '';
+
+    // ---------- caixas de seleção ----------
+
+    function preencherSelect(select, opcoes) {
+      const vazia = document.createElement('option');
+      vazia.value = '';
+      vazia.textContent = 'Selecione';
+      select.appendChild(vazia);
+      opcoes.forEach(function (texto) {
+        const opcao = document.createElement('option');
+        opcao.textContent = texto;
+        select.appendChild(opcao);
+      });
+    }
+    preencherSelect(el('curso'), typeof CURSOS !== 'undefined' ? CURSOS : []);
+    preencherSelect(el('turma'), typeof TURMAS !== 'undefined' ? TURMAS : []);
+
+    // ---------- máscaras e validação ----------
+
+    const digitos = (texto) => texto.replace(/\D/g, '');
+
+    function mascaraCpf(valor) {
+      const d = digitos(valor).slice(0, 11);
+      return d.replace(/^(\d{3})(\d)/, '$1.$2')
+              .replace(/^(\d{3})\.(\d{3})(\d)/, '$1.$2.$3')
+              .replace(/\.(\d{3})(\d{1,2})$/, '.$1-$2');
+    }
+
+    function mascaraTelefone(valor) {
+      const d = digitos(valor).slice(0, 11);
+      if (d.length <= 2) return d.length ? '(' + d : '';
+      const meio = d.length === 11 ? d.slice(2, 7) : d.slice(2, 6);
+      const fim = d.length === 11 ? d.slice(7) : d.slice(6);
+      return '(' + d.slice(0, 2) + ') ' + meio + (fim ? '-' + fim : '');
+    }
+
+    function cpfValido(cpf) {
+      const d = digitos(cpf);
+      if (d.length !== 11 || /^(\d)\1{10}$/.test(d)) return false;
+      for (let t = 9; t < 11; t++) {
+        let soma = 0;
+        for (let i = 0; i < t; i++) soma += Number(d[i]) * (t + 1 - i);
+        if ((soma * 10) % 11 % 10 !== Number(d[t])) return false;
+      }
+      return true;
+    }
+
+    el('cpf').addEventListener('input', function () { this.value = mascaraCpf(this.value); });
+    el('telefone').addEventListener('input', function () { this.value = mascaraTelefone(this.value); });
+
+    // ---------- mensagens ----------
 
     function mostrarMensagem(texto, tipo) {
       const alvo = el('mensagem');
@@ -71,6 +117,18 @@
       el('info').textContent = detalhe || '';
       el('formulario').classList.add('escondido');
     }
+
+    function mostrarParabens(nome) {
+      const agora = new Date();
+      const hora = agora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+      el('detalhe').textContent = nome.split(' ')[0] + ', sua presença em "' + tituloEvento
+        + '" foi registrada às ' + hora + '.';
+      el('cartao').classList.add('escondido');
+      el('parabens').classList.remove('escondido');
+      window.scrollTo(0, 0);
+    }
+
+    // ---------- fluxo ----------
 
     async function carregar() {
       if (!eventoId || !token) {
@@ -86,26 +144,43 @@
       }
 
       const evento = resposta.evento;
+      eventoId = evento.id || eventoId; // o QR traz só o começo do ID
+      sessao = resposta.sessao || '';
+      tituloEvento = evento.titulo;
       el('titulo').textContent = evento.titulo;
       el('info').textContent = evento.data + ' · ' + evento.cargaHoraria
-        + 'h — confirme sua presença';
+        + 'h — confirme sua presença'
+        + (resposta.sessaoMinutos ? ' (você tem ' + resposta.sessaoMinutos + ' minutos para enviar)' : '');
       el('formulario').classList.remove('escondido');
     }
 
-    async function enviar() {
+    async function enviar(e) {
+      e.preventDefault();
       const dados = {
         acao: 'presenca',
         evento: eventoId,
         token: token,
-        nome: el('nome').value.trim(),
+        sessao: sessao,
+        nome: el('nome').value.trim().replace(/\s+/g, ' '),
+        telefone: el('telefone').value.trim(),
         cpf: el('cpf').value.trim(),
-        matricula: el('matricula').value.trim(),
         curso: el('curso').value,
-        periodo: el('periodo').value.trim()
+        turma: el('turma').value
       };
 
-      if (!dados.nome || !dados.cpf || !dados.matricula || !dados.curso || !dados.periodo) {
+      if (!dados.nome || !dados.telefone || !dados.cpf || !dados.curso || !dados.turma) {
         mostrarMensagem('Preencha todos os campos.', 'falha');
+        return;
+      }
+      const tel = digitos(dados.telefone);
+      if (tel.length < 10 || tel.length > 11) {
+        mostrarMensagem('Telefone inválido. Informe o DDD e o número.', 'falha');
+        el('telefone').focus();
+        return;
+      }
+      if (!cpfValido(dados.cpf)) {
+        mostrarMensagem('CPF inválido. Confira os números digitados.', 'falha');
+        el('cpf').focus();
         return;
       }
 
@@ -114,22 +189,20 @@
 
       const resposta = await chamarApi(dados);
       if (resposta.ok) {
-        el('formulario').classList.add('escondido');
-        el('mensagem').className = '';
-        el('mensagem').innerHTML = '<div class="ok">Presença confirmada com sucesso!</div>';
+        mostrarParabens(dados.nome);
         return;
       }
 
       el('btnEnviar').disabled = false;
       mostrarMensagem(resposta.erro, 'falha');
       if (resposta.expirado) {
-        // O token venceu enquanto o aluno preenchia: o formulário atual não
+        // A sessão venceu enquanto o aluno preenchia: o formulário atual não
         // serve mais, ele precisa escanear o código novo que está na tela.
         encerrar('QR Code expirado', resposta.erro);
       }
     }
 
-    el('btnEnviar').addEventListener('click', enviar);
+    el('formulario').addEventListener('submit', enviar);
     carregar();
   </script>
 </body>

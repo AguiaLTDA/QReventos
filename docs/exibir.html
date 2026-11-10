@@ -8,11 +8,26 @@
   <link rel="stylesheet" href="estilo.css">
 </head>
 <body class="projecao">
-  <h1 id="titulo">Carregando...</h1>
-  <div class="info" id="info"></div>
-  <div id="qr"></div>
-  <div class="contador escondido" id="blocoContador">Atualiza em <span id="segundos">60</span>s</div>
-  <div class="mensagem" id="mensagem"></div>
+  <button class="tela-cheia" id="btnTelaCheia" title="Atalho: tecla F">Tela cheia</button>
+
+  <main class="palco">
+    <div class="moldura" id="moldura">
+      <div id="qr"></div>
+      <div class="selo-vencido">Reconectando...</div>
+    </div>
+
+    <aside class="lateral">
+      <h1 id="titulo">Carregando...</h1>
+      <div class="info" id="info"></div>
+      <div class="instrucao">Aponte a câmera do celular para o QR Code e confirme sua presença.</div>
+      <div class="progresso escondido" id="blocoProgresso"><div class="barra" id="barra"></div></div>
+      <div class="contador escondido" id="blocoContador"></div>
+      <div class="total escondido" id="blocoTotal">
+        <strong id="total">0</strong> <span id="rotuloTotal">presenças registradas</span>
+      </div>
+      <div class="mensagem" id="mensagem"></div>
+    </aside>
+  </main>
 
   <script src="config.js"></script>
   <script src="api.js"></script>
@@ -21,34 +36,50 @@
     const el = (id) => document.getElementById(id);
     const eventoId = new URLSearchParams(location.search).get('evento') || '';
 
+    const JANELA_SEGUNDOS = 60;      // igual a JANELA_TOKEN_SEGUNDOS no servidor
+    const INTERVALO_CONTAGEM_MS = 15000;
+
     // O QR aponta para a página de presença ao lado desta, seja qual for o
     // endereço onde o site estiver publicado.
     const urlFormulario = new URL('presenca.html', location.href).href;
 
-    let timerContagem = null;
+    let fimJanela = 0;   // quando o servidor troca de token (ms, relógio local)
+    let validoAte = 0;   // quando o QR exibido deixa de ser aceito (janela atual + tolerância)
+    let totalAnterior = null;
 
     function avisar(texto) {
       el('mensagem').textContent = texto;
     }
 
     function montarQr(token) {
+      // Link o mais curto possível: cada caractere a menos tira módulos do QR,
+      // e com menos módulos cada um fica maior na tela — dá para ler de mais longe.
+      // Só os 8 primeiros caracteres do ID vão no link; o servidor completa.
       const destino = urlFormulario
-        + '?evento=' + encodeURIComponent(eventoId)
-        + '&token=' + encodeURIComponent(token);
+        + '?e=' + encodeURIComponent(eventoId.slice(0, 8))
+        + '&t=' + encodeURIComponent(token);
       // Nível M: tolera ~15% de dano, suficiente para telão, reflexo e foto de longe.
-      QRDinamico.renderizar(el('qr'), destino, { nivel: 'M', tamanho: 420 });
+      QRDinamico.renderizar(el('qr'), destino, { nivel: 'M', tamanho: 900 });
     }
 
-    function iniciarContagem(segundos) {
-      if (timerContagem) clearInterval(timerContagem);
-      el('blocoContador').classList.remove('escondido');
-      let restante = segundos;
-      el('segundos').textContent = restante;
-      timerContagem = setInterval(function () {
-        restante--;
-        el('segundos').textContent = Math.max(restante, 0);
-        if (restante <= 0) clearInterval(timerContagem);
-      }, 1000);
+    // ---------- relógio da tela ----------
+
+    // Um só relógio cuida do texto, da barra e do QR apagado. Ele lê o tempo
+    // real a cada volta, então uma aba que ficou em segundo plano não acumula
+    // atraso.
+    function tique() {
+      if (!fimJanela) return;
+      const agora = Date.now();
+      const faltaMs = Math.max(0, fimJanela - agora);
+      const falta = Math.ceil(faltaMs / 1000);
+
+      el('blocoContador').textContent = falta > 0 ? 'Novo código em ' + falta + 's' : 'Atualizando...';
+      el('barra').style.width = (faltaMs / (JANELA_SEGUNDOS * 1000) * 100) + '%';
+
+      // O servidor ainda aceita o token da janela anterior por mais um minuto.
+      // Só depois disso o QR na tela é inútil, e ele é apagado para ninguém
+      // perder tempo escaneando.
+      el('moldura').classList.toggle('vencido', agora > validoAte);
     }
 
     async function atualizar() {
@@ -70,11 +101,85 @@
         return;
       }
 
-      iniciarContagem(resposta.segundosRestantes);
+      const agora = Date.now();
+      fimJanela = agora + resposta.segundosRestantes * 1000;
+      validoAte = fimJanela + JANELA_SEGUNDOS * 1000;
+      el('blocoContador').classList.remove('escondido');
+      el('blocoProgresso').classList.remove('escondido');
+      tique();
+
       // Reagenda no fim da janela de token do servidor, em vez de a cada 60s
       // corridos: sem isso o relógio da tela vai saindo de sincronia e o QR
       // exibido passa a ser o da janela anterior.
       setTimeout(atualizar, resposta.segundosRestantes * 1000 + 500);
+    }
+
+    // ---------- contador de presenças ----------
+
+    async function atualizarTotal() {
+      const resposta = await chamarComoAdmin({ acao: 'contarPresencas', evento: eventoId });
+      if (resposta.ok) {
+        el('total').textContent = resposta.total;
+        el('rotuloTotal').textContent = resposta.total === 1 ? 'presença registrada' : 'presenças registradas';
+        el('blocoTotal').classList.remove('escondido');
+        if (totalAnterior !== null && resposta.total > totalAnterior) {
+          // Reinicia a animação de destaque a cada nova presença.
+          el('blocoTotal').classList.remove('subiu');
+          void el('blocoTotal').offsetWidth;
+          el('blocoTotal').classList.add('subiu');
+        }
+        totalAnterior = resposta.total;
+      }
+      // Falha aqui não atrapalha o QR: só tenta de novo na próxima volta.
+      setTimeout(atualizarTotal, INTERVALO_CONTAGEM_MS);
+    }
+
+    // ---------- tela cheia e tela sempre acesa ----------
+
+    function alternarTelaCheia() {
+      if (document.fullscreenElement) {
+        document.exitFullscreen();
+      } else if (document.documentElement.requestFullscreen) {
+        document.documentElement.requestFullscreen().catch(function () {
+          avisar('O navegador não permitiu tela cheia. Use F11.');
+        });
+      }
+    }
+
+    document.addEventListener('fullscreenchange', function () {
+      el('btnTelaCheia').textContent = document.fullscreenElement ? 'Sair da tela cheia' : 'Tela cheia';
+    });
+
+    // Evita que o computador do telão apague a tela ou entre em descanso no
+    // meio do evento. O navegador solta essa trava quando a aba fica oculta,
+    // então ela é pedida de novo quando a aba volta.
+    let travaTela = null;
+    async function manterTelaAcesa() {
+      if (!('wakeLock' in navigator) || document.visibilityState !== 'visible') return;
+      try {
+        travaTela = await navigator.wakeLock.request('screen');
+      } catch (err) {
+        travaTela = null; // sem suporte ou sem permissão: segue normalmente
+      }
+    }
+    document.addEventListener('visibilitychange', manterTelaAcesa);
+
+    el('btnTelaCheia').addEventListener('click', alternarTelaCheia);
+    document.addEventListener('keydown', function (e) {
+      if ((e.key === 'f' || e.key === 'F') && !e.ctrlKey && !e.metaKey && !e.altKey) alternarTelaCheia();
+    });
+
+    // ---------- início ----------
+
+    async function carregarEvento() {
+      const resposta = await chamarComoAdmin({ acao: 'eventoAdmin', evento: eventoId });
+      if (resposta.ok || !/Ação desconhecida/.test(resposta.erro || '')) return resposta;
+
+      // API ainda na versão anterior (sem "eventoAdmin"): procura na lista completa.
+      const lista = await chamarComoAdmin({ acao: 'listarEventos' });
+      if (!lista.ok) return lista;
+      const evento = lista.eventos.filter((e) => e.id === eventoId)[0];
+      return evento ? { ok: true, evento: evento } : { ok: false, erro: 'Evento não encontrado.' };
     }
 
     async function iniciar() {
@@ -89,25 +194,23 @@
         return;
       }
 
-      const info = await chamarComoAdmin({ acao: 'listarEventos' });
-      if (info.ok) {
-        const evento = info.eventos.filter((e) => e.id === eventoId)[0];
-        if (evento) {
-          el('titulo').textContent = evento.titulo;
-          el('info').textContent = evento.data + ' · ' + evento.cargaHoraria
-            + 'h — escaneie para confirmar presença';
-          document.title = evento.titulo + ' — QR de Presença';
-        } else {
-          el('titulo').textContent = 'Evento não encontrado';
-          return;
-        }
-      } else {
+      const resposta = await carregarEvento();
+      if (!resposta.ok) {
         el('titulo').textContent = 'Não foi possível carregar o evento';
-        avisar(info.erro);
+        avisar(resposta.erro);
         return;
       }
 
+      const evento = resposta.evento;
+      el('titulo').textContent = evento.titulo;
+      el('info').textContent = evento.data + ' · ' + evento.cargaHoraria
+        + 'h';
+      document.title = evento.titulo + ' — QR de Presença';
+
+      manterTelaAcesa();
+      setInterval(tique, 250);
       atualizar();
+      atualizarTotal();
     }
 
     iniciar();
